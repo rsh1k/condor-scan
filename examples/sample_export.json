@@ -1,0 +1,78 @@
+{
+  "roles": {
+    "roles/custom.cicd": [
+      "iam.roles.update",
+      "storage.objects.get"
+    ]
+  },
+  "exposed_principals": [
+    "serviceAccount:frontend@demo-prod.iam.gserviceaccount.com"
+  ],
+  "group_members": {
+    "group:platform@example.com": [
+      "user:alice@example.com",
+      "user:grace@example.com"
+    ]
+  },
+  "iam_policies": [
+    {
+      "resource": "//cloudresourcemanager.googleapis.com/projects/demo-prod",
+      "bindings": [
+        {
+          "role": "roles/viewer",
+          "members": ["user:dave@example.com"]
+        },
+        {
+          "role": "roles/resourcemanager.tagUser",
+          "members": ["user:alice@example.com", "user:grace@example.com"]
+        },
+        {
+          "role": "roles/owner",
+          "members": ["group:platform@example.com"],
+          "condition": {
+            "title": "only-prod-tagged",
+            "expression": "resource.matchTag('123456789/env', 'prod')"
+          }
+        },
+        {
+          "role": "roles/resourcemanager.projectIamAdmin",
+          "members": ["user:carol@example.com"]
+        },
+        {
+          "role": "roles/cloudfunctions.developer",
+          "members": ["user:eve@example.com"]
+        },
+        {
+          "role": "roles/owner",
+          "members": ["serviceAccount:privileged@demo-prod.iam.gserviceaccount.com"]
+        },
+        {
+          "role": "roles/custom.cicd",
+          "members": ["user:frank@example.com"]
+        }
+      ]
+    },
+    {
+      "resource": "//iam.googleapis.com/projects/demo-prod/serviceAccounts/privileged@demo-prod.iam.gserviceaccount.com",
+      "bindings": [
+        {
+          "role": "roles/iam.serviceAccountTokenCreator",
+          "members": [
+            "user:bob@example.com",
+            "serviceAccount:frontend@demo-prod.iam.gserviceaccount.com"
+          ]
+        },
+        {
+          "role": "roles/iam.serviceAccountUser",
+          "members": ["user:eve@example.com"]
+        }
+      ]
+    }
+  ],
+  "tag_bindings": [
+    {
+      "resource": "//cloudresourcemanager.googleapis.com/projects/demo-prod",
+      "tagValue": "123456789/env/prod"
+    }
+  ]
+}

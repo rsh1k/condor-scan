@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "condor-scan"
+version = "0.2.0"
+description = "GCP conditional IAM & tag-based privilege-escalation scanner"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+keywords = ["gcp", "iam", "security", "cspm", "ciem", "privilege-escalation"]
+authors = [{ name = "condor-scan contributors" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3",
+]
+# Zero runtime dependencies: the analysis core uses only the standard library,
+# which keeps the supply-chain footprint of a security tool minimal.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.4", "mypy>=1.8"]
+# Live Cloud Asset Inventory ingestion (optional).
+cloud = ["google-cloud-asset>=3.20"]
+
+[project.scripts]
+condor = "condor.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/condor"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Generated Rego contains intentionally long sprintf format strings.
+"src/condor/constraints.py" = ["E501"]
+# Test fixtures embed long GCP resource paths that should stay on one line.
+"tests/*.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["condor"]
+mypy_path = "src"
+strict = true
