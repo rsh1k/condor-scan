@@ -1,0 +1,66 @@
+name: Release
+
+# Publishes condor-scan to PyPI via Trusted Publishing (OIDC) whenever a
+# GitHub Release is published. No API token is stored anywhere: PyPI verifies
+# a short-lived OpenID Connect identity minted by this exact workflow.
+#
+# Trust is established on PyPI under Account -> Publishing with these values,
+# which MUST match the settings below:
+#   PyPI Project Name : condor-scan
+#   Owner             : rsh1k
+#   Repository name   : condor-scan
+#   Workflow name     : release.yml
+#   Environment name  : pypi
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}   # allow manual runs for testing
+
+jobs:
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # The environment name here must match the "Environment name" you enter in
+    # the PyPI pending-publisher form. Create it under repo Settings ->
+    # Environments if it does not exist yet.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/condor-scan/
+    permissions:
+      id-token: write   # REQUIRED for OIDC Trusted Publishing
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # No 'password' input: the action exchanges the GitHub OIDC token with
+        # PyPI for a short-lived upload token automatically.
