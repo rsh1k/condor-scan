@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from condor import analyze_posture, build_context, load_from_dict
-from condor.graph import _greedy_choke_points
-from condor.techniques import TECHNIQUE_BY_RULE, is_step_logged
+from condor_scan import analyze_posture, build_context, load_from_dict
+from condor_scan.graph import _greedy_choke_points
+from condor_scan.techniques import TECHNIQUE_BY_RULE, is_step_logged
 
 
 def _posture(data: dict):
@@ -126,7 +126,7 @@ def test_shared_grant_is_a_single_choke_point():
 
 
 def test_greedy_cover_picks_highest_leverage_first():
-    from condor.findings import Enabler, Finding, Severity
+    from condor_scan.findings import Enabler, Finding, Severity
 
     shared = Enabler(kind="binding", role="roles/owner", member="g", resource="r")
     solo = Enabler(kind="binding", role="roles/x", member="u3", resource="r2")

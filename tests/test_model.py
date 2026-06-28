@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from condor.model import Binding, Condition, Principal, PrincipalType
+from condor_scan.model import Binding, Condition, Principal, PrincipalType
 
 
 def test_principal_type_parsing():

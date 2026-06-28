@@ -3,9 +3,9 @@
 Uses only the standard library (argparse) to keep the supply-chain footprint of
 a security tool minimal. Subcommands:
 
-    condor scan EXPORT.json [--format json|sarif|table] [--fail-on SEVERITY]
-    condor posture EXPORT.json [--format text|json] [--fail-on-exposed]
-    condor gen-constraints [--out-dir DIR]
+    condor-scan scan EXPORT.json [--format json|sarif|table] [--fail-on SEVERITY]
+    condor-scan posture EXPORT.json [--format text|json] [--fail-on-exposed]
+    condor-scan gen-constraints [--out-dir DIR]
 
 ``scan`` and ``posture`` exit non-zero on policy violations so they can gate a
 CI pipeline.
@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .analysis import build_context
@@ -24,6 +25,7 @@ from .findings import Severity, render
 from .graph import analyze_posture
 from .loaders import LoaderError, load_from_file
 from .rules import EscalationEngine
+from .temporal import parse_timestamp
 
 _EXIT_OK = 0
 _EXIT_FINDINGS = 1
@@ -32,7 +34,7 @@ _EXIT_USAGE = 2
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="condor",
+        prog="condor-scan",
         description=(
             "Detect GCP IAM privilege-escalation chains, including tag-based "
             "and IAM-Conditions escalation paths."
@@ -53,6 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[s.name.lower() for s in Severity if s >= Severity.LOW],
         default=None,
         help="exit non-zero if any finding is at or above this severity",
+    )
+    scan.add_argument(
+        "--as-of",
+        default=None,
+        metavar="ISO8601",
+        help="evaluate time-bound conditions as of this instant (default: now)",
     )
 
     gen = sub.add_parser(
@@ -80,18 +88,40 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="exit non-zero if any externally-exposed Tier-Zero path exists",
     )
+    posture.add_argument(
+        "--as-of",
+        default=None,
+        metavar="ISO8601",
+        help="evaluate time-bound conditions as of this instant (default: now)",
+    )
+    posture.add_argument(
+        "--jit-threshold-hours",
+        type=float,
+        default=24.0,
+        help="windows shorter than this count as JIT/short-lived (default: 24)",
+    )
     return parser
+
+
+def _parse_as_of(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    parsed = parse_timestamp(value)
+    if parsed is None:
+        raise ValueError(f"invalid --as-of timestamp: {value!r}")
+    return parsed
 
 
 def _run_scan(args: argparse.Namespace) -> int:
     try:
         env = load_from_file(args.export)
-    except (LoaderError, FileNotFoundError) as exc:
+        now = _parse_as_of(args.as_of)
+    except (LoaderError, FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return _EXIT_USAGE
 
     ctx = build_context(env)
-    findings = EscalationEngine(ctx).analyze_all()
+    findings = EscalationEngine(ctx, now=now).analyze_all()
     print(render(findings, args.format))
 
     if args.fail_on is not None:
@@ -120,12 +150,16 @@ def _run_gen_constraints(args: argparse.Namespace) -> int:
 def _run_posture(args: argparse.Namespace) -> int:
     try:
         env = load_from_file(args.export)
-    except (LoaderError, FileNotFoundError) as exc:
+        now = _parse_as_of(args.as_of)
+    except (LoaderError, FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return _EXIT_USAGE
 
     ctx = build_context(env)
-    report = analyze_posture(ctx)
+    engine = EscalationEngine(
+        ctx, now=now, jit_threshold=timedelta(hours=args.jit_threshold_hours)
+    )
+    report = analyze_posture(ctx, engine)
     if args.format == "json":
         print(json.dumps(report.to_dict(), indent=2))
     else:

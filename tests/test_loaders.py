@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from condor.loaders import (
+from condor_scan.loaders import (
     LoaderError,
     load_from_cloud_asset_inventory,
     load_from_dict,

@@ -8,7 +8,7 @@ from .graph import PostureReport, analyze_posture
 from .loaders import load_from_dict, load_from_file
 from .rules import EscalationEngine
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "EscalationEngine",

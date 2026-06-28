@@ -17,6 +17,7 @@ from .knowledge import (
     role_permissions,
 )
 from .model import Binding, Environment
+from .temporal import TemporalWindow, parse_temporal_window
 
 
 @dataclass
@@ -28,6 +29,7 @@ class ConditionalGrant:
     condition_title: str
     condition_expression: str
     resource: str
+    temporal: TemporalWindow = field(default_factory=TemporalWindow)
 
 
 @dataclass(frozen=True)
@@ -194,6 +196,7 @@ def _apply_binding(
                 condition_title=binding.condition.title,
                 condition_expression=binding.condition.expression,
                 resource=resource,
+                temporal=parse_temporal_window(binding.condition.expression),
             )
         )
     else:

@@ -6,7 +6,7 @@ asserts the finding, severity, and that the attack chain is captured.
 
 from __future__ import annotations
 
-from condor import EscalationEngine, Severity, build_context, load_from_dict
+from condor_scan import EscalationEngine, Severity, build_context, load_from_dict
 
 
 def _engine(data: dict) -> EscalationEngine:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from condor.cli import main
+from condor_scan.cli import main
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "sample_export.json"
 
@@ -79,3 +79,33 @@ def test_posture_fail_on_exposed_exits_nonzero(capsys):
     rc = main(["posture", str(EXAMPLE), "--fail-on-exposed"])
     capsys.readouterr()
     assert rc == 1  # the example contains an exposed Tier-Zero path
+
+
+def test_posture_as_of_inside_break_glass_window(capsys):
+    # The example's oncall break-glass window is open at this instant.
+    rc = main(
+        ["posture", str(EXAMPLE), "--format", "json", "--as-of", "2027-03-01T09:00:00Z"]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert "user:oncall@example.com" in payload["active_jit_escalations"]
+
+
+def test_posture_default_time_shows_oncall_as_scheduled(capsys):
+    # As of 2026 (well before the 2027 window) the grant is dormant, not live.
+    rc = main(
+        ["posture", str(EXAMPLE), "--format", "json", "--as-of", "2026-06-28T00:00:00Z"]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    members = {s["member"] for s in payload["scheduled_escalations"]}
+    assert "user:oncall@example.com" in members
+    # The expired contractor grant is neither live nor scheduled.
+    assert "user:contractor@example.com" not in payload["active_jit_escalations"]
+
+
+def test_scan_invalid_as_of_is_usage_error(capsys):
+    rc = main(["scan", str(EXAMPLE), "--as-of", "not-a-timestamp"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "error:" in err

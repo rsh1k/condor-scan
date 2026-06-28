@@ -95,6 +95,18 @@ TECHNIQUE_BY_RULE: dict[str, AttackTechnique] = {
             "SIEM content keyed on policy changes will not fire."
         ),
     ),
+    "CONDOR-JITGRANT": AttackTechnique(
+        id="T1078.004",
+        name="Valid Accounts: Cloud Accounts (time-bound grant)",
+        tactic="Privilege Escalation",
+        logged_by_default=True,
+        log_source="Admin Activity audit logs (binding creation)",
+        note=(
+            "The time-bound binding's creation is logged, but its USE during the "
+            "active window emits no distinct event, so misuse of a live JIT or "
+            "break-glass grant is hard to spot in real time."
+        ),
+    ),
 }
 
 # Token-minting primitives that land in (off-by-default) Data Access logs.

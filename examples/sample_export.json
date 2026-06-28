@@ -49,6 +49,22 @@
         {
           "role": "roles/custom.cicd",
           "members": ["user:frank@example.com"]
+        },
+        {
+          "role": "roles/owner",
+          "members": ["user:oncall@example.com"],
+          "condition": {
+            "title": "break-glass-window",
+            "expression": "request.time > timestamp('2027-03-01T08:00:00Z') && request.time < timestamp('2027-03-01T12:00:00Z')"
+          }
+        },
+        {
+          "role": "roles/owner",
+          "members": ["user:contractor@example.com"],
+          "condition": {
+            "title": "engagement-ended",
+            "expression": "request.time < timestamp('2025-01-01T00:00:00Z')"
+          }
         }
       ]
     },

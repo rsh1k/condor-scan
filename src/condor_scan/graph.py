@@ -22,6 +22,7 @@ from .analysis import AnalysisContext
 from .findings import Enabler, EscalationStep, Finding, Severity
 from .rules import EscalationEngine
 from .techniques import is_step_logged
+from .temporal import TemporalStatus
 
 
 @dataclass
@@ -41,6 +42,17 @@ class BlindSpot:
 
 
 @dataclass
+class ScheduledEscalation:
+    """A conditional escalatory grant that is not active yet but will be."""
+
+    member: str
+    role: str
+    resource: str
+    condition_title: str
+    becomes_active: str | None
+
+
+@dataclass
 class PostureReport:
     """Organisation-level attack-path summary derived from the findings."""
 
@@ -51,6 +63,11 @@ class PostureReport:
     exposed_tier_zero: list[str]
     choke_points: list[ChokePoint]
     blind_spots: list[BlindSpot]
+    jit_escalations: list[str] = field(default_factory=list)
+    scheduled_escalations: list[ScheduledEscalation] = field(
+        default_factory=list
+    )
+    evaluated_at: str | None = None
 
     # -- derived headline metrics ---------------------------------------
     @property
@@ -62,6 +79,7 @@ class PostureReport:
         return {
             "tool": "condor-scan",
             "report": "attack-path-posture",
+            "evaluated_at": self.evaluated_at,
             "metrics": {
                 "principals_analyzed": self.total_principals,
                 "findings": len(self.findings),
@@ -69,6 +87,8 @@ class PostureReport:
                 "externally_exposed_to_tier_zero": len(self.exposed_tier_zero),
                 "remediation_budget": self.remediation_budget,
                 "detection_blind_spots": len(self.blind_spots),
+                "active_jit_escalations": len(self.jit_escalations),
+                "scheduled_escalations": len(self.scheduled_escalations),
             },
             "untrusted_sources": self.untrusted_sources,
             "exposed_tier_zero_principals": self.exposed_tier_zero,
@@ -88,6 +108,17 @@ class PostureReport:
                 }
                 for bs in self.blind_spots
             ],
+            "active_jit_escalations": self.jit_escalations,
+            "scheduled_escalations": [
+                {
+                    "member": se.member,
+                    "role": se.role,
+                    "resource": se.resource,
+                    "condition": se.condition_title,
+                    "becomes_active": se.becomes_active,
+                }
+                for se in self.scheduled_escalations
+            ],
         }
 
     def to_text(self) -> str:
@@ -104,7 +135,26 @@ class PostureReport:
         )
         add(f"Remediation budget (choke points)  {self.remediation_budget}")
         add(f"Detection blind spots ............ {len(self.blind_spots)}")
+        add(f"Active JIT escalations ........... {len(self.jit_escalations)}")
+        add(f"Scheduled (future) escalations ... {len(self.scheduled_escalations)}")
+        if self.evaluated_at:
+            add(f"Evaluated as of .................. {self.evaluated_at}")
         add("")
+
+        if self.jit_escalations:
+            add("ACTIVE JIT ESCALATION (live now, short-lived window):")
+            for principal in self.jit_escalations:
+                expiry = next(
+                    (
+                        f.expires_at
+                        for f in self.findings
+                        if f.principal == principal and f.expires_at
+                    ),
+                    None,
+                )
+                suffix = f" (expires {expiry})" if expiry else ""
+                add(f"  * {principal}{suffix}")
+            add("")
 
         if self.exposed_tier_zero:
             add("EXTERNALLY EXPOSED PATHS TO TIER ZERO (fix first):")
@@ -122,6 +172,13 @@ class PostureReport:
                 )
             add("")
 
+        if self.scheduled_escalations:
+            add("SCHEDULED / DORMANT ESCALATION (not exploitable yet):")
+            for se in self.scheduled_escalations:
+                when = f" at {se.becomes_active}" if se.becomes_active else ""
+                add(f"  > {se.member} -> {se.role} on {se.resource}{when}")
+            add("")
+
         if self.blind_spots:
             add("DETECTION BLIND SPOTS (escalation with no default audit signal):")
             seen: set[str] = set()
@@ -133,7 +190,13 @@ class PostureReport:
                 add(f"  ~ [{bs.step.rule_id}] {bs.principal}: {bs.step.detail}")
             add("")
 
-        if not (self.exposed_tier_zero or self.choke_points or self.blind_spots):
+        if not (
+            self.exposed_tier_zero
+            or self.choke_points
+            or self.blind_spots
+            or self.jit_escalations
+            or self.scheduled_escalations
+        ):
             add("No Tier-Zero escalation, external exposure, or blind spots found.")
         return "\n".join(lines)
 
@@ -198,6 +261,34 @@ def _blind_spots(findings: list[Finding]) -> list[BlindSpot]:
     return spots
 
 
+def _scheduled_escalations(
+    ctx: AnalysisContext, engine: EscalationEngine
+) -> list[ScheduledEscalation]:
+    """Conditional escalatory grants that are not active yet but will be.
+
+    These are latent risk: dormant today, exploitable once their window opens.
+    We surface them so they can be reviewed before they go live.
+    """
+    out: list[ScheduledEscalation] = []
+    for idx in ctx.principals.values():
+        for grant in idx.conditional_grants:
+            if grant.temporal.status(engine.now) is not TemporalStatus.FUTURE:
+                continue
+            if not engine._grant_is_escalatory(grant):
+                continue
+            nb = grant.temporal.not_before
+            out.append(
+                ScheduledEscalation(
+                    member=idx.member,
+                    role=grant.role,
+                    resource=grant.resource,
+                    condition_title=grant.condition_title,
+                    becomes_active=nb.isoformat() if nb else None,
+                )
+            )
+    return sorted(out, key=lambda s: (s.becomes_active or "", s.member))
+
+
 def analyze_posture(
     ctx: AnalysisContext, engine: EscalationEngine | None = None
 ) -> PostureReport:
@@ -211,6 +302,7 @@ def analyze_posture(
 
     tier_zero = [f for f in findings if f.severity >= Severity.CRITICAL]
     exposed_tier_zero = sorted(f.principal for f in tier_zero if f.exposure)
+    jit_escalations = sorted(f.principal for f in findings if f.jit)
 
     return PostureReport(
         total_principals=len(ctx.principals),
@@ -220,4 +312,7 @@ def analyze_posture(
         exposed_tier_zero=exposed_tier_zero,
         choke_points=_greedy_choke_points(tier_zero),
         blind_spots=_blind_spots(findings),
+        jit_escalations=jit_escalations,
+        scheduled_escalations=_scheduled_escalations(ctx, engine),
+        evaluated_at=engine.now.isoformat(),
     )

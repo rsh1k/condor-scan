@@ -4,7 +4,7 @@ install:
 	pip install -e ".[dev]"
 
 test:
-	pytest --cov=condor --cov-report=term-missing
+	pytest --cov=condor_scan --cov-report=term-missing
 
 lint:
 	ruff check src tests
@@ -16,7 +16,7 @@ type:
 check: lint type test
 
 demo:
-	condor scan examples/sample_export.json --format table
+	condor-scan scan examples/sample_export.json --format table
 
 clean:
 	rm -rf build dist *.egg-info .pytest_cache .mypy_cache .ruff_cache

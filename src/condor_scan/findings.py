@@ -104,6 +104,10 @@ class Finding:
     # Set by posture analysis: the untrusted source this principal is reachable
     # from (e.g. "allUsers"), or None if not externally exposed.
     exposure: str | None = None
+    # Temporal annotations: whether any active step is a short-lived (JIT) grant,
+    # and the soonest expiry among active time-bound steps (ISO-8601).
+    jit: bool = False
+    expires_at: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)

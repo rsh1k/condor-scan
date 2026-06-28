@@ -2,6 +2,8 @@
 
 **A GCP privilege-escalation scanner that thinks in attack paths, not findings.**
 
+> Install: `pip install condor-scan` · [PyPI](https://pypi.org/project/condor-scan/) · Apache-2.0 · Python 3.10+
+
 condor-scan reads an export of your Google Cloud IAM and tells you not just
 *who has dangerous permissions*, but *who can chain those permissions into full
 control*, *which of them an outsider could reach*, *what the single highest-
@@ -145,13 +147,53 @@ simply never fires. condor-scan surfaces these silent paths explicitly as
 "detection blind spots" so a SOC knows exactly where to turn on Data Access
 logging or write tag-binding detections.
 
+### 5. Temporal / JIT awareness — *is it exploitable right now?*
+
+IAM Conditions are often time-bound. A break-glass procedure grants Owner for
+four hours; a contractor's access expires at the end of an engagement; a
+just-in-time access tool hands out short-lived elevation on demand. All of these
+are expressed in CEL against `request.time`.
+
+A scanner that ignores time gets two things wrong. It reports **expired** grants
+as live escalations — a false positive that burns responder time chasing access
+that no longer exists. And it has no way to flag the case that matters most for
+live monitoring: a grant that is **active right now but only briefly**. A daily
+CSPM sweep can miss a two-hour break-glass window entirely.
+
+condor-scan parses the `request.time` bounds out of each condition and
+classifies every conditional grant relative to an evaluation instant:
+
+- **Expired** grants are dropped from the closure — they are no longer a path,
+  so they are no longer a finding. (This also quietly fixes a real correctness
+  bug the tool had before: a tag-conditional grant whose window had passed used
+  to be reported as exploitable.)
+- **Future** grants don't count as live escalation but are surfaced separately
+  as *scheduled / dormant* — latent risk to review before it goes live.
+- **Active** grants are analysed normally, and if the window is short-lived
+  (below a configurable threshold, default 24h) the finding is flagged **JIT**
+  with its expiry time. There is also a dedicated rule for an active, time-bound
+  *direct* grant of an escalatory role — the literal break-glass case — which
+  the engine would otherwise not surface at all.
+
+Because the evaluation instant is injectable (`--as-of`), you can ask forward-
+looking questions too: *what will be exploitable next Monday at 09:00?* The same
+export, evaluated at two different instants, gives two different answers — which
+is exactly right.
+
 ---
 
 ## Installation
 
+condor-scan is published on [PyPI](https://pypi.org/project/condor-scan/):
+
 ```bash
-pip install condor-scan          # once published
-# or, from a checkout:
+pip install condor-scan
+```
+
+This installs the `condor-scan` command. To work on the project from a checkout
+instead, with the test and lint tooling:
+
+```bash
 pip install -e ".[dev]"
 ```
 
@@ -170,10 +212,10 @@ Python 3.10+.
 ### Scan for escalation chains
 
 ```bash
-condor scan export.json                    # human-readable table
-condor scan export.json --format json      # machine-readable, ATT&CK-enriched
-condor scan export.json --format sarif      # SARIF 2.1.0 for CI dashboards
-condor scan export.json --fail-on critical  # non-zero exit to gate CI
+condor-scan scan export.json                    # human-readable table
+condor-scan scan export.json --format json      # machine-readable, ATT&CK-enriched
+condor-scan scan export.json --format sarif      # SARIF 2.1.0 for CI dashboards
+condor-scan scan export.json --fail-on critical  # non-zero exit to gate CI
 ```
 
 ### Run the attack-path posture report
@@ -182,9 +224,14 @@ This is the triage / executive view — exposure, the remediation plan, and blin
 spots in one place:
 
 ```bash
-condor posture export.json
-condor posture export.json --format json
-condor posture export.json --fail-on-exposed   # CI gate on internet-reachable Tier Zero
+condor-scan posture export.json
+condor-scan posture export.json --format json
+condor-scan posture export.json --fail-on-exposed   # CI gate on internet-reachable Tier Zero
+
+# Temporal questions: evaluate time-bound conditions at a chosen instant.
+condor-scan posture export.json --as-of 2026-12-01T09:00:00Z
+condor-scan posture export.json --jit-threshold-hours 4      # what counts as "short-lived"
+condor-scan scan    export.json --as-of 2026-12-01T09:00:00Z # scan also honours --as-of
 ```
 
 Example output against the bundled `examples/sample_export.json`:
@@ -220,7 +267,7 @@ an OPA / Policy Library constraint at deploy time (Terraform validation, a CI
 gate) rather than only as an after-the-fact scan:
 
 ```bash
-condor gen-constraints --out-dir ./policy
+condor-scan gen-constraints --out-dir ./policy
 ```
 
 This emits a Rego constraint template plus an instance compatible with the
@@ -267,6 +314,7 @@ graph.py        attack-path intelligence: exposure, choke-point
                 set-cover, detection blind spots ──► PostureReport
                                                      │
 techniques.py   MITRE ATT&CK + audit-log visibility model
+temporal.py     request.time window parsing + JIT/expiry classification
 constraints.py  preventive OPA/Rego policy generator
 cli.py          argparse front-end (scan / posture / gen-constraints)
 knowledge.py    curated escalation primitives + predefined-role subsets
@@ -304,6 +352,10 @@ can isolate, say, the greedy set-cover from the closure from the CEL parser.
   (public Cloud Run/Functions SAs, etc.) you supply.
 - **Resource-hierarchy inheritance** (org → folder → project) is modelled per
   policy resource, not as full inherited-binding propagation.
+- **Temporal parsing is limited to `request.time` vs `timestamp('...')`.** Other
+  time expressions (durations, `request.time.getHours()`, recurring windows) are
+  treated as unbounded on that side — the conservative default. Evaluation uses
+  a single instant; it does not reason about recurring schedules.
 
 These are written down on purpose so findings are interpreted correctly rather
 than trusted blindly.
@@ -320,11 +372,30 @@ make demo           # run the scanner against the bundled example
 ```
 
 The project holds itself to: **ruff** clean, **mypy `--strict`** clean across
-every module, and a **pytest** suite (56 tests, ~97% coverage) that exercises
+every module, and a **pytest** suite (72 tests, ~96% coverage) that exercises
 every escalation path with both positive and negative cases, the set-cover
-algorithm, the exposure logic, the blind-spot detection, and the CLI end to end.
+algorithm, the exposure logic, the blind-spot detection, the temporal/JIT
+classification, and the CLI end to end.
 
 ---
+
+## Releasing (maintainers)
+
+Releases are built with [`build`](https://pypi.org/project/build/) and uploaded
+with [`twine`](https://pypi.org/project/twine/):
+
+```bash
+python -m pip install --upgrade build twine
+rm -rf dist build *.egg-info
+python -m build                      # produces dist/*.whl and dist/*.tar.gz
+twine check dist/*                   # validate metadata renders on PyPI
+twine upload dist/*                  # authenticate with a PyPI API token
+```
+
+Bump `version` in `pyproject.toml` (and `__version__` in
+`src/condor_scan/__init__.py`) for each release; PyPI refuses to overwrite an
+existing version. Consider testing against TestPyPI first, or wiring GitHub
+Actions Trusted Publishing so no token ever leaves CI.
 
 ## License
 

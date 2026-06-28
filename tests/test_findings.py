@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from condor.constraints import generate_constraint_yaml, generate_rego
-from condor.findings import (
+from condor_scan.constraints import generate_constraint_yaml, generate_rego
+from condor_scan.findings import (
     EscalationStep,
     Finding,
     Severity,

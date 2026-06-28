@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from condor.cel import extract_tag_predicates, is_tag_based
+from condor_scan.cel import extract_tag_predicates, is_tag_based
 
 
 def test_match_tag_by_namespaced_name():
